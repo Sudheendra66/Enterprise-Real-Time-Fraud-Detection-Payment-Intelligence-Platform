@@ -1,0 +1,193 @@
+# =============================================================================
+# Enterprise Fraud Detection Platform - Git Ignore Rules
+# =============================================================================
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials/
+secrets/
+*.credentials
+*.secret
+*.env.local
+*.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.envrc
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# Logs and local runtime output
+logs/
+**/logs/
+*.log
+*.out
+*.err
+tmp/
+temp/
+.tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Airflow
+airflow/logs/
+airflow/plugins/__pycache__/
+airflow/dags/__pycache__/
+airflow/airflow.db
+airflow/airflow.cfg
+airflow/webserver_config.py
+airflow/*.pid
+airflow/*.log
+airflow/standalone_admin_password.txt
+airflow/*.sqlite
+airflow/*.sqlite3
+standalone_admin_password.txt
+
+# Spark / Hadoop / Delta Lake generated state
+spark-warehouse/
+metastore_db/
+derby.log
+warehouse/
+checkpoints/
+checkpoint/
+_checkpoint/
+_checkpoints/
+data/checkpoints/
+**/_spark_metadata/
+**/.crc
+**/._COPYING_
+**/_temporary/
+**/.part-*
+**/_delta_log/
+data/bronze/
+data/silver/
+data/gold/
+data/tmp/
+data/temp/
+delta/
+delta_tables/
+
+# Databricks
+.databricks/
+databricks/.databricks/
+*.dbc
+.bundle/
+databricks/.bundle/
+databricks/bundle/
+
+# dbt
+target/
+dbt_packages/
+logs/dbt.log
+**/target/
+**/dbt_packages/
+**/logs/dbt.log
+!fraud_gold/target/.gitkeep
+
+# Docker / compose local overrides
+.docker/
+docker-compose.override.yml
+docker-compose.*.override.yml
+*.pid
+
+# Streamlit
+.streamlit/secrets.toml
+streamlit_dashboard/.streamlit/secrets.toml
+
+# Data extracts and generated local artifacts
+*.parquet
+*.orc
+*.avro
+*.snappy
+*.delta
+*.sqlite
+*.sqlite3
+*.db
+*.duckdb
+*.csv.gz
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+!data/.gitkeep
+!data/**/.gitkeep
+data/raw/*.csv
+batch/source/*.csv
+batch/landing/**/*.csv
+
+# Editors and IDEs
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+._*
+
+# Project-local scratch files
+screenshots/
+debug/
+debug_*/
+*_debug.*
+*_tmp.*

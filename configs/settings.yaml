@@ -1,0 +1,27 @@
+project:
+  name: Enterprise Real-Time Fraud Detection Platform
+  environment: local
+
+kafka:
+  bootstrap_servers: localhost:9092
+
+  topics:
+    raw: fraud.transactions.raw
+    valid: fraud.transactions.valid
+    dlq: fraud.transactions.dlq
+
+replay:
+  csv_path: data/raw/train_transaction.csv
+
+  replay_speed: 0.00
+
+  max_events: 600000
+
+  batch_size: 1000
+
+  retry_attempts: 3
+
+logging:
+  level: INFO
+
+  log_directory: logs

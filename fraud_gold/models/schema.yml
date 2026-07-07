@@ -1,0 +1,60 @@
+version: 2
+
+sources:
+  - name: scored
+    catalog: fraud_platform
+    schema: scored
+
+    tables:
+      - name: transactions_scored
+
+models:
+  - name: fraud_summary
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+
+      - name: fraud_rate
+        tests:
+          - not_null
+
+  - name: customer_risk_summary
+    columns:
+      - name: card4
+        tests:
+          - not_null
+
+      - name: card6
+        tests:
+          - not_null
+
+  - name: merchant_risk_summary
+    columns:
+      - name: ProductCD
+        tests:
+          - not_null
+
+  - name: payment_method_summary
+    columns:
+      - name: card4
+        tests:
+          - not_null
+
+      - name: card6
+        tests:
+          - not_null
+
+  - name: risk_level_summary
+    columns:
+      - name: risk_level
+        tests:
+          - accepted_values:
+              values: ['LOW', 'MEDIUM', 'HIGH']
+
+  - name: amount_bucket_summary
+    columns:
+      - name: amount_bucket
+        tests:
+          - accepted_values:
+              values: ['LOW', 'MEDIUM', 'HIGH']

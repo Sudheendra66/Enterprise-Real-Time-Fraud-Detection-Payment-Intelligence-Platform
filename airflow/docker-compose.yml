@@ -1,0 +1,96 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  build: .
+
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY:-}"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+    AIRFLOW_UID: 50000
+
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./config:/opt/airflow/config
+
+    # Batch Scripts
+    - ../batch:/opt/airflow/batch
+
+    # dbt Project
+    - ../fraud_gold:/opt/airflow/dbt/fraud_gold
+
+    # Optional local dbt profiles. Keep credentials outside the repository.
+    - ${DBT_PROFILES_DIR:-../fraud_gold/profiles}:/home/airflow/.dbt
+
+  user: "${AIRFLOW_UID:-50000}:0"
+
+services:
+
+  postgres:
+    image: postgres:15
+
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+
+  airflow-init:
+    <<: *airflow-common
+
+    depends_on:
+      - postgres
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow users create
+      --username ${AIRFLOW_ADMIN_USERNAME:-admin}
+      --firstname ${AIRFLOW_ADMIN_FIRSTNAME:-Admin}
+      --lastname ${AIRFLOW_ADMIN_LASTNAME:-User}
+      --role Admin
+      --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+      --password ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      "
+
+  airflow-webserver:
+    <<: *airflow-common
+
+    depends_on:
+      - postgres
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    command: webserver
+
+    ports:
+      - "8081:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+
+    depends_on:
+      - postgres
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    command: scheduler
+
+volumes:
+  postgres-db-volume:

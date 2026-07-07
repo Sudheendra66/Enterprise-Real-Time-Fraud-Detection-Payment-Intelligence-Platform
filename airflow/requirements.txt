@@ -1,0 +1,6 @@
+apache-airflow==2.10.0
+apache-airflow-providers-databricks<=6
+boto3
+databricks-sdk
+dbt-core==1.11.0
+dbt-databricks==1.11.0

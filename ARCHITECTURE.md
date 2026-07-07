@@ -1,194 +1,32 @@
-# Architecture Decisions
-
-## Streaming
-
-Source
-
-IEEE-CIS Fraud Dataset
-
-↓
-
-Replay Producer
-
-↓
-
-Kafka
-
-↓
-
-Spark Structured Streaming
-
-Streaming is Near Real-Time.
-
-Latency target
-
-2–10 seconds.
-
----
-
-## Batch
-
-Airflow ingests
-
-- Customer Master
-- Merchant Master
-- Country Risk
-- OFAC
-- Exchange Rates
-
----
-
-## Medallion Layers
-
-metadata
-
-pipeline configs
-
-fraud rules
-
-thresholds
-
-job configs
-
----
-
-audit
-
-pipeline logs
-
-stream logs
-
-DLQ logs
-
-quality logs
-
----
-
-bronze
-
-raw ingestion
-
----
-
-silver
-
-cleaned + enriched
-
----
-
-feature_store
-
-engineered features
-
----
-
-scored
-
-fraud scores
-
-triggered rules
-
----
-
-gold
-
-executive marts
-
----
-
-## Fraud Rules
-
-Stored inside
-
-metadata.fraud_rules
-
-No hardcoded rules.
-
----
-
-## dbt owns Gold
-
-Databricks owns
-
-Bronze
-
-Silver
-
-Feature Store
-
-Scored
-
-dbt owns
-
-Gold
-
-Only dbt writes marts.
-
----
-
-## Governance
-
-Unity Catalog
-
-- Metadata
-- Lineage
-- Audit
-- Row Security
-- Column Security
-- Access Control
-
----
-
-## Dead Letter Queue
-
-Kafka
-
-↓
-
-deadletter.events
-
-↓
-
-bronze.dead_letter_events
-
-↓
-
-audit.dead_letter_logs
-
----
-
-## Serving
-
-Databricks SQL Warehouse
-
-↓
-
-Streamlit
-
----
-
-## Alerting
-
-Slack
-
-Email
-
-Webhook
-
-Investigation Queue
-
----
-
-## Monitoring
-
-Kafka
-
-Airflow
-
-Databricks
-
-Pipeline Health
-
-Streaming Metrics
-
-Cost Monitoring
+# Architecture
+
+This platform follows a lakehouse-oriented fraud analytics architecture.
+
+```mermaid
+flowchart TD
+    source["Transaction CSV / Batch Files"] --> replay["Replay Engine"]
+    replay --> kafka["Kafka Topic"]
+    kafka --> streaming["Spark Structured Streaming"]
+    streaming --> bronze["Delta Bronze"]
+    source --> batch["Batch Landing Zone"]
+    batch --> airflow["Airflow DAGs"]
+    airflow --> databricks["Databricks Jobs"]
+    bronze --> databricks
+    databricks --> gold["Delta Gold Tables"]
+    gold --> dbt["dbt Models and Tests"]
+    dbt --> sql["Databricks SQL Warehouse"]
+    sql --> dashboard["Streamlit Dashboard"]
+```
+
+## Layers
+
+- **Ingestion:** Replay and batch utilities load raw transaction data.
+- **Streaming:** Kafka and Spark Structured Streaming simulate real-time payment flows.
+- **Lakehouse:** Delta Lake stores bronze and curated analytical tables.
+- **Transformation:** Databricks and dbt create business-ready fraud metrics.
+- **Orchestration:** Airflow coordinates batch and Databricks workflows.
+- **Serving:** Streamlit reads Databricks SQL Warehouse outputs.
+
+## Security Model
+
+No secrets are hardcoded. Runtime credentials must be supplied through environment variables, Airflow connections, Databricks workspace configuration, or Streamlit Community Cloud secrets.

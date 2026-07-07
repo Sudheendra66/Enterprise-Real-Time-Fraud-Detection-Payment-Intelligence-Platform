@@ -1,0 +1,167 @@
+name: CI
+
+# Run validation for every branch update and every pull request.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-validation:
+    # Use the current GitHub-hosted Ubuntu image for a Linux production-like CI environment.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out the repository so all source, dbt, Airflow, and Docker files are available.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install the required Python version for application, tests, and validation tooling.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Upgrade pip before installing project dependencies to reduce resolver and wheel issues.
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      # Install the application dependencies used by source imports, tests, linting, and formatting.
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+
+      # Install optional development dependencies when the repository provides them.
+      - name: Install development dependencies
+        run: |
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          else
+            echo "requirements-dev.txt not found; skipping development dependency install."
+          fi
+
+      # Ensure dbt is available with a local adapter so parse and compile do not require cloud credentials.
+      - name: Install dbt validation adapter
+        run: pip install dbt-duckdb
+
+      # Verify Python formatting with Black without modifying files.
+      - name: Check formatting with Black
+        run: black --check .
+
+      # Fail the build on Flake8 lint violations while ignoring generated and local environment folders.
+      - name: Lint with Flake8
+        run: |
+          flake8 . \
+            --exclude .git,.github,.venv,__pycache__,logs,data,batch/source,batch/landing,fraud_gold/target,fraud_gold/dbt_packages
+
+      # Run pytest; treat "no tests collected" as a non-failing repository state.
+      - name: Run pytest
+        run: |
+          set +e
+          pytest
+          status=$?
+          set -e
+
+          if [ "$status" -eq 5 ]; then
+            echo "No tests were collected; continuing by policy."
+            exit 0
+          fi
+
+          exit "$status"
+
+      # Create a temporary local dbt profile so validation never depends on Databricks, AWS, or other cloud credentials.
+      - name: Create credential-free dbt profile
+        run: |
+          mkdir -p "${RUNNER_TEMP}/dbt_profiles"
+          cat > "${RUNNER_TEMP}/dbt_profiles/profiles.yml" <<'EOF'
+          fraud_gold:
+            target: ci
+            outputs:
+              ci:
+                type: duckdb
+                path: fraud_gold_ci.duckdb
+          EOF
+
+      # Resolve dbt package dependencies without running models or requiring warehouse credentials.
+      - name: Validate dbt dependencies
+        run: dbt deps --project-dir fraud_gold --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+
+      # Parse the dbt project to catch invalid project configuration, YAML, macros, refs, and sources.
+      - name: Parse dbt project
+        run: dbt parse --project-dir fraud_gold --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+
+      # Compile dbt SQL for validation only; this intentionally does not execute dbt run.
+      - name: Compile dbt project
+        run: dbt compile --project-dir fraud_gold --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+
+      # Import Airflow DAG files with lightweight stubs so syntax and import-time errors fail without starting Airflow.
+      - name: Validate Airflow DAG imports
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+          import types
+
+
+          class _DummyTask:
+              def __init__(self, *args, **kwargs):
+                  pass
+
+              def __rshift__(self, other):
+                  return other
+
+              def __rrshift__(self, other):
+                  return self
+
+
+          class _DummyDAG(_DummyTask):
+              def __enter__(self):
+                  return self
+
+              def __exit__(self, exc_type, exc, tb):
+                  return False
+
+
+          def _install_module(name):
+              module = types.ModuleType(name)
+              sys.modules[name] = module
+              return module
+
+
+          airflow = _install_module("airflow")
+          airflow.DAG = _DummyDAG
+
+          operators = _install_module("airflow.operators")
+          empty = _install_module("airflow.operators.empty")
+          bash = _install_module("airflow.operators.bash")
+          empty.EmptyOperator = _DummyTask
+          bash.BashOperator = _DummyTask
+
+          providers = _install_module("airflow.providers")
+          databricks = _install_module("airflow.providers.databricks")
+          databricks_operators = _install_module("airflow.providers.databricks.operators")
+          databricks_operator = _install_module("airflow.providers.databricks.operators.databricks")
+          databricks_operator.DatabricksRunNowOperator = _DummyTask
+
+          dag_dir = pathlib.Path("airflow/dags")
+          dag_files = sorted(dag_dir.glob("*.py"))
+
+          if not dag_files:
+              print("No Airflow DAG files found; skipping DAG import validation.")
+              raise SystemExit(0)
+
+          for dag_file in dag_files:
+              print(f"Importing {dag_file}")
+              spec = importlib.util.spec_from_file_location(dag_file.stem, dag_file)
+              module = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(module)
+
+          print(f"Imported {len(dag_files)} Airflow DAG file(s) successfully.")
+          PY
+
+      # Build Docker images only; do not start containers or require runtime services.
+      - name: Build Docker images
+        run: docker compose build
+
+      # Print a clear success message after all validation gates have passed.
+      - name: Print success message
+        run: echo "CI validation completed successfully: formatting, linting, tests, dbt, Airflow DAG imports, and Docker builds passed."
