@@ -35,7 +35,7 @@
 - [Environment Variables](#-environment-variables)
 - [Running the Platform](#-running-the-platform)
 - [CI/CD](#-github-actions-ci)
-- [Screenshots](#-screenshots)
+- [Live Dashboard](#-live-dashboard)
 - [Future Improvements](#-future-improvements)
 - [Learning Outcomes](#-learning-outcomes)
 
@@ -257,16 +257,11 @@ The workflow in `.github/workflows/ci.yml` runs on every push and pull request:
 
 ---
 
-## 🖼️ Screenshots
+## 🌐 Live Dashboard
 
-> Add screenshots before publishing a polished release:
+The Streamlit fraud intelligence dashboard is deployed and publicly viewable:
 
-| Screenshot | Path |
-|---|---|
-| Dashboard Overview | `docs/images/dashboard-overview.png` |
-| Fraud Trend | `docs/images/fraud-trend.png` |
-| Airflow DAGs | `docs/images/airflow-dags.png` |
-| dbt Lineage | `docs/images/dbt-lineage.png` |
+**👉 [enterprise-real-time-fraud-detection-payment-intelligence-plat.streamlit.app](https://enterprise-real-time-fraud-detection-payment-intelligence-plat.streamlit.app/)**
 
 ---
 
@@ -275,8 +270,6 @@ The workflow in `.github/workflows/ci.yml` runs on every push and pull request:
 - [ ] Add Great Expectations or Soda checks for landing-zone validation
 - [ ] Add OpenLineage metadata collection for Airflow and dbt
 - [ ] Add IaC examples for Databricks jobs and cloud networking
-- [ ] Add sample masked dashboard screenshots
-- [ ] Add synthetic transaction generator for fully public demo data
 
 ---
 
