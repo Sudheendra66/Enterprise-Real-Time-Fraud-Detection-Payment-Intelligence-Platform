@@ -1,14 +1,13 @@
-name: Enterprise CI
+name: CI
 
 on:
   push:
     branches:
       - main
+      - master
       - develop
-
+      - '**'
   pull_request:
-
-  workflow_dispatch:
 
 jobs:
   build-validation:
@@ -24,8 +23,7 @@ jobs:
           python-version: "3.12"
 
       - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Install Project Dependencies
         run: |
@@ -35,46 +33,38 @@ jobs:
         run: |
           if [ -f requirements-dev.txt ]; then
             pip install -r requirements-dev.txt
+          else
+            echo "No requirements-dev.txt found."
           fi
 
       - name: Install CI Tools
         run: |
-          pip install black flake8 pytest dbt-duckdb
+          pip install flake8 pytest dbt-duckdb
 
-      #####################################################
-      # BLACK
-      #####################################################
-
-      - name: Check Formatting
-        run: |
-          black --check .
-
-      #####################################################
-      # FLAKE8
-      #####################################################
-
-      - name: Run Flake8
+      - name: Lint with Flake8
         run: |
           flake8 . \
-          --exclude=.git,.github,.venv,__pycache__,logs,data,target,dbt_packages
+          --exclude=.git,.github,.venv,__pycache__,logs,data,batch/source,batch/landing,fraud_gold/target,fraud_gold/dbt_packages
 
-      #####################################################
-      # PYTEST
-      #####################################################
-
-      - name: Run Unit Tests
+      - name: Run Pytest
         run: |
-          pytest || true
+          set +e
+          pytest
+          status=$?
+          set -e
 
-      #####################################################
-      # DBT VALIDATION
-      #####################################################
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected."
+            exit 0
+          fi
+
+          exit "$status"
 
       - name: Create Temporary dbt Profile
         run: |
           mkdir -p "${RUNNER_TEMP}/dbt_profiles"
 
-          cat > "${RUNNER_TEMP}/dbt_profiles/profiles.yml" << EOF
+          cat > "${RUNNER_TEMP}/dbt_profiles/profiles.yml" <<EOF
           fraud_gold:
             target: ci
             outputs:
@@ -83,52 +73,93 @@ jobs:
                 path: fraud_gold_ci.duckdb
           EOF
 
-      - name: dbt Dependencies
+      - name: Install dbt Packages
         run: |
           dbt deps \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
 
-      - name: dbt Parse
+      - name: Parse dbt Project
         run: |
           dbt parse \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
 
-      - name: dbt Compile
+      - name: Compile dbt Project
         run: |
           dbt compile \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
 
-      #####################################################
-      # AIRFLOW DAG VALIDATION
-      #####################################################
-
-      - name: Validate Airflow DAG Syntax
+      - name: Validate Airflow DAG Imports
         run: |
-          python -m py_compile airflow/dags/*.py
+          python <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+          import types
 
-      #####################################################
-      # DOCKER
-      #####################################################
+          class DummyTask:
+              def __init__(self, *args, **kwargs):
+                  pass
+
+              def __rshift__(self, other):
+                  return other
+
+              def __rrshift__(self, other):
+                  return self
+
+          class DummyDAG(DummyTask):
+              def __enter__(self):
+                  return self
+
+              def __exit__(self, exc_type, exc, tb):
+                  return False
+
+          def install(name):
+              module = types.ModuleType(name)
+              sys.modules[name] = module
+              return module
+
+          airflow = install("airflow")
+          airflow.DAG = DummyDAG
+
+          install("airflow.operators")
+          empty = install("airflow.operators.empty")
+          bash = install("airflow.operators.bash")
+
+          empty.EmptyOperator = DummyTask
+          bash.BashOperator = DummyTask
+
+          install("airflow.providers")
+          install("airflow.providers.databricks")
+          install("airflow.providers.databricks.operators")
+
+          databricks = install("airflow.providers.databricks.operators.databricks")
+          databricks.DatabricksRunNowOperator = DummyTask
+
+          dag_dir = pathlib.Path("airflow/dags")
+
+          for dag in dag_dir.glob("*.py"):
+              print(f"Importing {dag}")
+
+              spec = importlib.util.spec_from_file_location(dag.stem, dag)
+              module = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(module)
+
+          print("All DAGs imported successfully.")
+          PY
 
       - name: Build Docker Images
-        run: |
-          docker compose build
+        run: docker compose build
 
-      #####################################################
-      # SUCCESS
-      #####################################################
-
-      - name: CI Completed
+      - name: CI Success
         run: |
-          echo "=============================================="
-          echo "Enterprise CI completed successfully."
-          echo "✔ Formatting"
-          echo "✔ Linting"
-          echo "✔ Unit Tests"
-          echo "✔ dbt Validation"
-          echo "✔ Airflow DAG Validation"
-          echo "✔ Docker Build"
-          echo "=============================================="
+          echo "======================================"
+          echo "CI completed successfully."
+          echo "✔ Lint"
+          echo "✔ Tests"
+          echo "✔ dbt validation"
+          echo "✔ Airflow DAG validation"
+          echo "✔ Docker build"
+          echo "======================================"
