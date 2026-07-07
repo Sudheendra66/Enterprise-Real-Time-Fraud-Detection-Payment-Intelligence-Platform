@@ -1,3 +1,9 @@
+# =============================================================================
+# Enterprise Fraud Detection Platform - Continuous Integration
+# =============================================================================
+# Runs on every push to main/develop and on pull requests.
+# Validates code quality, runs tests, builds Docker images, and dbt models.
+
 name: CI
 
 on:
@@ -6,82 +12,341 @@ on:
       - main
       - master
       - develop
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "screenshots/**"
+      - ".gitignore"
+      - "LICENSE"
   pull_request:
+    branches:
+      - main
+      - master
+      - develop
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "screenshots/**"
+      - ".gitignore"
+      - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip test execution"
+        type: boolean
+        default: false
+      skip_docker:
+        description: "Skip Docker build"
+        type: boolean
+        default: false
+      run_full_suite:
+        description: "Run full test suite (including slow tests)"
+        type: boolean
+        default: false
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYTHON_MIN_VERSION: "3.11"
+  DOCKER_REGISTRY: ghcr.io
+  DBT_PROFILES_DIR: ${{ runner.temp }}/dbt_profiles
+
+# =============================================================================
+# Jobs
+# =============================================================================
 jobs:
-  build-validation:
+  # ---------------------------------------------------------------------------
+  # 1. Lint & Format Check
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install Project Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Development Dependencies
+      - name: Install Dependencies
         run: |
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          fi
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install dbt-duckdb
 
-      - name: Install CI Tools
-        run: |
-          pip install flake8 pytest dbt-duckdb
-
-      - name: Lint
+      - name: Lint with Flake8
         run: |
           flake8 . \
             --max-line-length=120 \
             --extend-ignore=E203,W293,W503,E501 \
-            --exclude=.git,.github,.venv,__pycache__,logs,data,fraud_gold/target,fraud_gold/dbt_packages
+            --exclude=.git,.github,.venv,__pycache__,logs,data,batch/source,batch/landing,fraud_gold/target,fraud_gold/dbt_packages
 
-      - name: Run Tests
+      - name: Format Check with Black
         run: |
-          pytest || true
+          black --check --diff . \
+            --exclude="\.venv/|\.git/|\.github/|__pycache__/|logs/|data/|batch/|fraud_gold/"
+
+      - name: Import Sort Check with isort
+        run: |
+          isort --check-only --diff . \
+            --skip-glob=".venv/*" \
+            --skip-glob="__pycache__/*" \
+            --skip-glob="logs/*" \
+            --skip-glob="data/*" \
+            --skip-glob="batch/*" \
+            --skip-glob="fraud_gold/*" \
+            --skip-glob="streamlit_dashboard/*"
+
+  # ---------------------------------------------------------------------------
+  # 2. Static Type Checking
+  # ---------------------------------------------------------------------------
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install types-PyYAML types-python-dateutil
+
+      - name: Mypy Static Type Check
+        run: |
+          mypy src/ \
+            --ignore-missing-imports \
+            --python-version 3.12 \
+            --warn-unused-configs \
+            --warn-redundant-casts \
+            --strict-optional
+
+  # ---------------------------------------------------------------------------
+  # 3. Unit Tests (with coverage)
+  # ---------------------------------------------------------------------------
+  test:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run Tests with Coverage
+        run: |
+          pip install pytest-cov
+          pytest tests/ \
+            -v \
+            --tb=short \
+            --strict-markers \
+            -m "not slow and not integration and not skip_ci" \
+            --cov=src/ \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: success()
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            .pytest_cache/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 4. dbt Model Validation
+  # ---------------------------------------------------------------------------
+  dbt-validate:
+    name: dbt Model Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dbt
+        run: pip install dbt-duckdb
 
       - name: Create Temporary dbt Profile
         shell: bash
         run: |
-          mkdir -p "${RUNNER_TEMP}/dbt_profiles"
-
-          cat > "${RUNNER_TEMP}/dbt_profiles/profiles.yml" <<EOF
+          mkdir -p "${DBT_PROFILES_DIR}"
+          cat > "${DBT_PROFILES_DIR}/profiles.yml" <<EOF
           fraud_gold:
             target: ci
             outputs:
               ci:
                 type: duckdb
                 path: fraud_gold_ci.duckdb
+                threads: 1
           EOF
 
       - name: dbt deps
         run: |
           dbt deps \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${DBT_PROFILES_DIR}"
 
       - name: dbt parse
         run: |
           dbt parse \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${DBT_PROFILES_DIR}"
 
       - name: dbt compile
         run: |
           dbt compile \
-          --project-dir fraud_gold \
-          --profiles-dir "${RUNNER_TEMP}/dbt_profiles"
+            --project-dir fraud_gold \
+            --profiles-dir "${DBT_PROFILES_DIR}"
+
+  # ---------------------------------------------------------------------------
+  # 5. Docker Build
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, type-check, test, dbt-validate]
+    if: |
+      always() &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.dbt-validate.result == 'success' || needs.dbt-validate.result == 'skipped')
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
 
       - name: Build Docker Images
         run: docker compose build
 
-      - name: Success
-        run: echo "CI completed successfully."
+      - name: List built images
+        run: docker compose images
+
+
+  # ---------------------------------------------------------------------------
+  # 6. Summary / Status Check
+  # ---------------------------------------------------------------------------
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint, type-check, test, dbt-validate, docker-build]
+
+    steps:
+      - name: Check All Jobs
+        run: |
+          echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          declare -A RESULTS
+          RESULTS[lint]="${{ needs.lint.result }}"
+          RESULTS[type-check]="${{ needs.type-check.result }}"
+          RESULTS[test]="${{ needs.test.result }}"
+          RESULTS[dbt-validate]="${{ needs.dbt-validate.result }}"
+          RESULTS[docker-build]="${{ needs.docker-build.result }}"
+
+          ALL_PASSED=true
+          for JOB in "${!RESULTS[@]}"; do
+            STATUS="${RESULTS[$JOB]}"
+            if [ "$STATUS" = "success" ] || [ "$STATUS" = "skipped" ]; then
+              echo "- ✅ **$JOB**: $STATUS" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ❌ **$JOB**: $STATUS" >> $GITHUB_STEP_SUMMARY
+              ALL_PASSED=false
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$ALL_PASSED" = true ]; then
+            echo "🎉 **All CI checks passed!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Some CI checks failed.**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
